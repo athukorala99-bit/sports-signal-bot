@@ -20,23 +20,85 @@ MIN_BET_CONFIDENCE = 7     # Claude confidence threshold (1-10)
 AZURO_SUBGRAPH = "https://thegraph-1.onchainfeed.org/subgraphs/name/azuro-protocol/azuro-data-feed-polygon"
 
 def fetch_upcoming_games():
-    """Fetch upcoming sports games from Azuro's public subgraph."""
+    """Fetch upcoming sports games from Azuro's V3 data-feed subgraph."""
     now_ts    = int(datetime.now(timezone.utc).timestamp())
-    cutoff_ts = now_ts + (24 * 3600)  # next 24 hours
+    cutoff_ts = now_ts + (72 * 3600)  # next 72 hours
 
+    # V3 schema: GameState (not GameStatus), ConditionState (not ConditionStatus)
     query = """
     {
       games(
-        first: 30
+        first: 50
         where: {
           startsAt_gt: "%s"
           startsAt_lt: "%s"
-          hasActiveConditions: true
+          state: Created
         }
         orderBy: startsAt
         orderDirection: asc
         subgraphError: allow
       ) {
+        id
+        gameId
+        slug
+        title
+        startsAt
+        state
+        sport { name }
+        league { name country { name } }
+        participants { name image }
+        conditions(where: { isExpressForbidden: false, state: Active }) {
+          conditionId
+          state
+          outcomes {
+            outcomeId
+            currentOdds
+          }
+        }
+      }
+    }
+    """ % (now_ts, cutoff_ts)
+
+    r = requests.post(AZURO_SUBGRAPH,
+        json={"query": query},
+        headers={"Content-Type": "application/json"},
+        timeout=15)
+    r.raise_for_status()
+    data = r.json()
+
+    if "errors" in data:
+        print(f"  ⚠ GraphQL errors: {data['errors']}")
+        # Fallback: try without state filters in case schema differs slightly
+        return fetch_upcoming_games_fallback(now_ts, cutoff_ts)
+
+    games = data.get("data", {}).get("games", [])
+    print(f"  Raw games returned: {len(games)}")
+
+    games_with_odds = [g for g in games if g.get("conditions")]
+    print(f"  Games with active conditions: {len(games_with_odds)}")
+
+    if not games_with_odds and games:
+        print(f"  ⚠ Games found but none have active conditions — trying fallback query")
+        return fetch_upcoming_games_fallback(now_ts, cutoff_ts)
+
+    return games_with_odds
+
+
+def fetch_upcoming_games_fallback(now_ts, cutoff_ts):
+    """Looser query without strict state filters, in case enum values differ."""
+    query = """
+    {
+      games(
+        first: 50
+        where: {
+          startsAt_gt: "%s"
+          startsAt_lt: "%s"
+        }
+        orderBy: startsAt
+        orderDirection: asc
+        subgraphError: allow
+      ) {
+        id
         gameId
         slug
         title
@@ -44,7 +106,7 @@ def fetch_upcoming_games():
         sport { name }
         league { name country { name } }
         participants { name image }
-        conditions(where: { isExpressForbidden: false }) {
+        conditions {
           conditionId
           outcomes {
             outcomeId
@@ -61,7 +123,16 @@ def fetch_upcoming_games():
         timeout=15)
     r.raise_for_status()
     data = r.json()
-    return data.get("data", {}).get("games", [])
+
+    if "errors" in data:
+        print(f"  ⚠ Fallback GraphQL errors: {data['errors']}")
+        return []
+
+    games = data.get("data", {}).get("games", [])
+    print(f"  Fallback raw games: {len(games)}")
+    games_with_odds = [g for g in games if g.get("conditions")]
+    print(f"  Fallback games with conditions: {len(games_with_odds)}")
+    return games_with_odds
 
 def parse_game(game):
     """Extract clean match data from raw Azuro game object."""
