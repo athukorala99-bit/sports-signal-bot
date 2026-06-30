@@ -20,11 +20,13 @@ MIN_BET_CONFIDENCE = 7     # Claude confidence threshold (1-10)
 AZURO_SUBGRAPH = "https://thegraph-1.onchainfeed.org/subgraphs/name/azuro-protocol/azuro-data-feed-polygon"
 
 def fetch_upcoming_games():
-    """Fetch upcoming sports games from Azuro's V3 data-feed subgraph."""
+    """Fetch upcoming sports games from Azuro's V3 data-feed subgraph.
+    V3 GameState enum values are: Finished, Live, Prematch, Stopped
+    Country is at the same level as league (not nested under it).
+    """
     now_ts    = int(datetime.now(timezone.utc).timestamp())
     cutoff_ts = now_ts + (72 * 3600)  # next 72 hours
 
-    # V3 schema: GameState (not GameStatus), ConditionState (not ConditionStatus)
     query = """
     {
       games(
@@ -32,7 +34,7 @@ def fetch_upcoming_games():
         where: {
           startsAt_gt: "%s"
           startsAt_lt: "%s"
-          state: Created
+          state: Prematch
         }
         orderBy: startsAt
         orderDirection: asc
@@ -45,11 +47,11 @@ def fetch_upcoming_games():
         startsAt
         state
         sport { name }
-        league { name country { name } }
+        league { name }
+        country { name }
         participants { name image }
-        conditions(where: { isExpressForbidden: false, state: Active }) {
+        conditions(where: { isExpressForbidden: false }) {
           conditionId
-          state
           outcomes {
             outcomeId
             currentOdds
@@ -68,7 +70,6 @@ def fetch_upcoming_games():
 
     if "errors" in data:
         print(f"  ⚠ GraphQL errors: {data['errors']}")
-        # Fallback: try without state filters in case schema differs slightly
         return fetch_upcoming_games_fallback(now_ts, cutoff_ts)
 
     games = data.get("data", {}).get("games", [])
@@ -78,14 +79,14 @@ def fetch_upcoming_games():
     print(f"  Games with active conditions: {len(games_with_odds)}")
 
     if not games_with_odds and games:
-        print(f"  ⚠ Games found but none have active conditions — trying fallback query")
+        print(f"  ⚠ Games found but none have conditions — trying fallback")
         return fetch_upcoming_games_fallback(now_ts, cutoff_ts)
 
     return games_with_odds
 
 
 def fetch_upcoming_games_fallback(now_ts, cutoff_ts):
-    """Looser query without strict state filters, in case enum values differ."""
+    """Looser query with minimal filters as a last resort."""
     query = """
     {
       games(
@@ -103,8 +104,10 @@ def fetch_upcoming_games_fallback(now_ts, cutoff_ts):
         slug
         title
         startsAt
+        state
         sport { name }
-        league { name country { name } }
+        league { name }
+        country { name }
         participants { name image }
         conditions {
           conditionId
@@ -178,7 +181,7 @@ def parse_game(game):
         "away":         away,
         "sport":        game.get("sport", {}).get("name", "Unknown"),
         "league":       game.get("league", {}).get("name", "Unknown"),
-        "country":      game.get("league", {}).get("country", {}).get("name", ""),
+        "country":      game.get("country", {}).get("name", ""),
         "starts_at":    starts_at.strftime("%Y-%m-%d %H:%M UTC"),
         "hours_until":  hours_until,
         "home_odds":    home_odds,
