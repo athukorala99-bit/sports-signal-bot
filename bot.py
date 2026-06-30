@@ -17,7 +17,7 @@ MAX_SIGNALS       = 8      # max signals per run (avoid Telegram spam)
 MIN_BET_CONFIDENCE = 7     # Claude confidence threshold (1-10)
 
 # ── Azuro GraphQL (public, no key needed) ─────────────────────────────────────
-AZURO_SUBGRAPH = "https://thegraph-1.onchainfeed.org/subgraphs/name/azuro-protocol/azuro-data-feed-polygon"
+AZURO_SUBGRAPH = "https://thegraph-1.onchainfeed.org/subgraphs/name/azuro-protocol/azuro-data-feed-gnosis"
 
 def debug_raw_query():
     """Debug query specifically for genuinely future games, sorted ascending."""
