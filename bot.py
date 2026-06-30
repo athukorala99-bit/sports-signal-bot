@@ -20,10 +20,17 @@ MIN_BET_CONFIDENCE = 7     # Claude confidence threshold (1-10)
 AZURO_SUBGRAPH = "https://thegraph-1.onchainfeed.org/subgraphs/name/azuro-protocol/azuro-data-feed-polygon"
 
 def debug_raw_query():
-    """Zero-filter query to see what's actually in the subgraph right now."""
+    """Debug query specifically for genuinely future games, sorted ascending."""
+    now_ts = int(datetime.now(timezone.utc).timestamp())
     query = """
     {
-      games(first: 5, orderBy: startsAt, orderDirection: desc, subgraphError: allow) {
+      games(
+        first: 10
+        where: { startsAt_gt: "%s" }
+        orderBy: startsAt
+        orderDirection: asc
+        subgraphError: allow
+      ) {
         id
         gameId
         title
@@ -31,12 +38,12 @@ def debug_raw_query():
         state
       }
     }
-    """
+    """ % now_ts
     try:
         r = requests.post(AZURO_SUBGRAPH, json={"query": query},
             headers={"Content-Type": "application/json"}, timeout=15)
         data = r.json()
-        print(f"  🔍 DEBUG raw query result: {json.dumps(data)[:800]}")
+        print(f"  🔍 DEBUG future games (now_ts={now_ts}): {json.dumps(data)[:1200]}")
     except Exception as e:
         print(f"  🔍 DEBUG query failed: {e}")
 
