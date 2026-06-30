@@ -19,6 +19,28 @@ MIN_BET_CONFIDENCE = 7     # Claude confidence threshold (1-10)
 # ── Azuro GraphQL (public, no key needed) ─────────────────────────────────────
 AZURO_SUBGRAPH = "https://thegraph-1.onchainfeed.org/subgraphs/name/azuro-protocol/azuro-data-feed-polygon"
 
+def debug_raw_query():
+    """Zero-filter query to see what's actually in the subgraph right now."""
+    query = """
+    {
+      games(first: 5, orderBy: startsAt, orderDirection: desc, subgraphError: allow) {
+        id
+        gameId
+        title
+        startsAt
+        state
+      }
+    }
+    """
+    try:
+        r = requests.post(AZURO_SUBGRAPH, json={"query": query},
+            headers={"Content-Type": "application/json"}, timeout=15)
+        data = r.json()
+        print(f"  🔍 DEBUG raw query result: {json.dumps(data)[:800]}")
+    except Exception as e:
+        print(f"  🔍 DEBUG query failed: {e}")
+
+
 def fetch_upcoming_games():
     """Fetch upcoming sports games from Azuro's V3 data-feed subgraph.
     V3 GameState enum values are: Finished, Live, Prematch, Stopped
@@ -27,6 +49,9 @@ def fetch_upcoming_games():
     now_ts    = int(datetime.now(timezone.utc).timestamp())
     cutoff_ts = now_ts + (72 * 3600)  # next 72 hours
 
+    # First, run a zero-filter debug query to see what's actually there
+    debug_raw_query()
+
     query = """
     {
       games(
@@ -34,7 +59,6 @@ def fetch_upcoming_games():
         where: {
           startsAt_gt: "%s"
           startsAt_lt: "%s"
-          state: Prematch
         }
         orderBy: startsAt
         orderDirection: asc
@@ -50,7 +74,7 @@ def fetch_upcoming_games():
         league { name }
         country { name }
         participants { name image }
-        conditions(where: { isExpressForbidden: false }) {
+        conditions {
           conditionId
           outcomes {
             outcomeId
@@ -70,17 +94,15 @@ def fetch_upcoming_games():
 
     if "errors" in data:
         print(f"  ⚠ GraphQL errors: {data['errors']}")
-        return fetch_upcoming_games_fallback(now_ts, cutoff_ts)
+        return []
 
     games = data.get("data", {}).get("games", [])
     print(f"  Raw games returned: {len(games)}")
+    if games:
+        print(f"  Sample game states: {[g.get('state') for g in games[:5]]}")
 
     games_with_odds = [g for g in games if g.get("conditions")]
-    print(f"  Games with active conditions: {len(games_with_odds)}")
-
-    if not games_with_odds and games:
-        print(f"  ⚠ Games found but none have conditions — trying fallback")
-        return fetch_upcoming_games_fallback(now_ts, cutoff_ts)
+    print(f"  Games with conditions: {len(games_with_odds)}")
 
     return games_with_odds
 
